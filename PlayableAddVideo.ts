@@ -1,5 +1,5 @@
 import axios from "axios"
-import fs, { access } from "fs"
+import fs from "fs"
 import path from "path"
 
 interface PlayableUserOptions {
@@ -61,7 +61,7 @@ class PlayableClient {
         await this.uploadVideo(edit.url_upload, videoOptions.filePath)
 
         // Step 4: Poll the edit endpoint until the video is done processing and ready
-        // Should move from the following states: uploading -> compiling -> transcoding -> ready
+        // states: uploading -> compiling -> transcoding -> ready
         await this.pollUntilReady(edit.edit_id)
 
         // Step 5: Get the snippet for the video using the video id from step 2
@@ -88,8 +88,16 @@ class PlayableClient {
         this.cognitoAccessToken = res.data.cognito_access_token
         this.propertyId = res.data.properties[0]
 
+        console.log("------------------------------------------------")
+        console.log("POST /session")
+        console.log("URL:", `${this.BASE_URL}/session`)
+        console.log("Payload:", {
+            email: this.email,
+            password: this.password
+        })
         console.log("Login response: ", res.data)
-
+        console.log("------------------------------------------------")
+        
         return {
             cognitoAccessToken: this.cognitoAccessToken,
             propertyId: this.propertyId
@@ -126,7 +134,12 @@ class PlayableClient {
 
         const res = await axios.post(`${this.BASE_URL}/edit?lang=en`, editData, config)
 
-        console.log("Create edit response: ", res.data)
+        console.log("------------------------------------------------")
+        console.log("POST /edit")
+        console.log("URL:", `${this.BASE_URL}/edit?lang=en`)
+        console.log("Payload:", editData)
+        console.log("Response:", res.data)
+        console.log("------------------------------------------------")
 
         return res.data
     }
@@ -152,13 +165,23 @@ class PlayableClient {
 
         const res = await axios.post(`${this.BASE_URL}/video?lang=en`, videoData, config)
 
-        console.log("Create video response: ", res.data)
+        console.log("------------------------------------------------")
+        console.log("POST /video")
+        console.log("URL:", `${this.BASE_URL}/video?lang=en`)
+        console.log("Payload:", videoData)
+        console.log("Response:", res.data)
+        console.log("------------------------------------------------")
 
         return res.data
     }
 
     private async uploadVideo(uploadUrl: string, filePath: string) {
         const fileBuffer = fs.readFileSync(filePath)
+
+        console.log("------------------------------------------------")
+        console.log("Uploading video to signed S3 URL")
+        console.log("Upload URL:", uploadUrl)
+        console.log("File size:", fileBuffer.length)
 
         const res = await axios.put(uploadUrl, fileBuffer, {
             headers: {
@@ -168,7 +191,9 @@ class PlayableClient {
             maxBodyLength: Infinity
         })
 
-        console.log("Upload response status: ", res.status)
+        console.log("Upload Response Status: ", res.status)
+        console.log("------------------------------------------------")
+
     }
 
     private async pollUntilReady(editId: number) {
@@ -180,6 +205,10 @@ class PlayableClient {
             }
         }
 
+        console.log("------------------------------------------------")
+        console.log(`GET /edit/${editId}`)
+        console.log("URL:", `${this.BASE_URL}/edit/${editId}?&lang=en`)
+
         while (true) {
             const res = await axios.get(
                 `${this.BASE_URL}/edit/${editId}?&lang=en`,
@@ -187,12 +216,13 @@ class PlayableClient {
             )
 
             const status = res.data.edit.states.autoplay.status
-            console.log(`Current status: ${status}`)
+            console.log(`Polling edit ${editId} status:`, status)
 
             if (status === "ready") return
 
             await new Promise(r => setTimeout(r, 3000))
         }
+        
     }
 
     private async getSnippet(videoId: string) {
@@ -208,7 +238,13 @@ class PlayableClient {
             config
         )
 
-        console.log("Snippet: ", res.data.video.snippet_html)
+        console.log("------------------------------------------------")
+        console.log(`GET /video/${videoId}`)
+        console.log("URL:", `${this.BASE_URL}/video/${videoId}?&lang=en`)
+        console.log("Response:", res.data)
+        console.log("Snippet:", res.data.video.snippet_html)
+        console.log("------------------------------------------------")
+
 
         return res.data.video.snippet_html
     }

@@ -87,20 +87,20 @@ var PlayableClient = /** @class */ (function () {
                         // It sends the file to S3 storage
                         return [4 /*yield*/, this.uploadVideo(edit.url_upload, videoOptions.filePath)
                             // Step 4: Poll the edit endpoint until the video is done processing and ready
-                            // Should move from the following states: uploading -> compiling -> transcoding -> ready
+                            // states: uploading -> compiling -> transcoding -> ready
                         ];
                     case 4:
                         // Step 3: Upload the actual video file to the special S3 upload link provided in step 2
                         // It sends the file to S3 storage
                         _a.sent();
                         // Step 4: Poll the edit endpoint until the video is done processing and ready
-                        // Should move from the following states: uploading -> compiling -> transcoding -> ready
+                        // states: uploading -> compiling -> transcoding -> ready
                         return [4 /*yield*/, this.pollUntilReady(edit.edit_id)
                             // Step 5: Get the snippet for the video using the video id from step 2
                         ];
                     case 5:
                         // Step 4: Poll the edit endpoint until the video is done processing and ready
-                        // Should move from the following states: uploading -> compiling -> transcoding -> ready
+                        // states: uploading -> compiling -> transcoding -> ready
                         _a.sent();
                         return [4 /*yield*/, this.getSnippet(video.video_id)];
                     case 6:
@@ -132,7 +132,15 @@ var PlayableClient = /** @class */ (function () {
                         res = _a.sent();
                         this.cognitoAccessToken = res.data.cognito_access_token;
                         this.propertyId = res.data.properties[0];
+                        console.log("------------------------------------------------");
+                        console.log("POST /session");
+                        console.log("URL:", "".concat(this.BASE_URL, "/session"));
+                        console.log("Payload:", {
+                            email: this.email,
+                            password: this.password
+                        });
                         console.log("Login response: ", res.data);
+                        console.log("------------------------------------------------");
                         return [2 /*return*/, {
                                 cognitoAccessToken: this.cognitoAccessToken,
                                 propertyId: this.propertyId
@@ -174,7 +182,12 @@ var PlayableClient = /** @class */ (function () {
                         return [4 /*yield*/, axios_1.default.post("".concat(this.BASE_URL, "/edit?lang=en"), editData, config)];
                     case 1:
                         res = _a.sent();
-                        console.log("Create edit response: ", res.data);
+                        console.log("------------------------------------------------");
+                        console.log("POST /edit");
+                        console.log("URL:", "".concat(this.BASE_URL, "/edit?lang=en"));
+                        console.log("Payload:", editData);
+                        console.log("Response:", res.data);
+                        console.log("------------------------------------------------");
                         return [2 /*return*/, res.data];
                 }
             });
@@ -204,7 +217,12 @@ var PlayableClient = /** @class */ (function () {
                         return [4 /*yield*/, axios_1.default.post("".concat(this.BASE_URL, "/video?lang=en"), videoData, config)];
                     case 1:
                         res = _a.sent();
-                        console.log("Create video response: ", res.data);
+                        console.log("------------------------------------------------");
+                        console.log("POST /video");
+                        console.log("URL:", "".concat(this.BASE_URL, "/video?lang=en"));
+                        console.log("Payload:", videoData);
+                        console.log("Response:", res.data);
+                        console.log("------------------------------------------------");
                         return [2 /*return*/, res.data];
                 }
             });
@@ -217,6 +235,10 @@ var PlayableClient = /** @class */ (function () {
                 switch (_a.label) {
                     case 0:
                         fileBuffer = fs_1.default.readFileSync(filePath);
+                        console.log("------------------------------------------------");
+                        console.log("Uploading video to signed S3 URL");
+                        console.log("Upload URL:", uploadUrl);
+                        console.log("File size:", fileBuffer.length);
                         return [4 /*yield*/, axios_1.default.put(uploadUrl, fileBuffer, {
                                 headers: {
                                     "Content-Type": "video/quicktime",
@@ -226,7 +248,8 @@ var PlayableClient = /** @class */ (function () {
                             })];
                     case 1:
                         res = _a.sent();
-                        console.log("Upload response status: ", res.status);
+                        console.log("Upload Response Status: ", res.status);
+                        console.log("------------------------------------------------");
                         return [2 /*return*/];
                 }
             });
@@ -244,6 +267,9 @@ var PlayableClient = /** @class */ (function () {
                                 'Authorization': "".concat(this.cognitoAccessToken)
                             }
                         };
+                        console.log("------------------------------------------------");
+                        console.log("GET /edit/".concat(editId));
+                        console.log("URL:", "".concat(this.BASE_URL, "/edit/").concat(editId, "?&lang=en"));
                         _a.label = 1;
                     case 1:
                         if (!true) return [3 /*break*/, 4];
@@ -251,7 +277,7 @@ var PlayableClient = /** @class */ (function () {
                     case 2:
                         res = _a.sent();
                         status_1 = res.data.edit.states.autoplay.status;
-                        console.log("Current status: ".concat(status_1));
+                        console.log("Polling edit ".concat(editId, " status:"), status_1);
                         if (status_1 === "ready")
                             return [2 /*return*/];
                         return [4 /*yield*/, new Promise(function (r) { return setTimeout(r, 3000); })];
@@ -278,7 +304,12 @@ var PlayableClient = /** @class */ (function () {
                         return [4 /*yield*/, axios_1.default.get("".concat(this.BASE_URL, "/video/").concat(videoId, "?&lang=en"), config)];
                     case 1:
                         res = _a.sent();
-                        console.log("Snippet: ", res.data.video.snippet_html);
+                        console.log("------------------------------------------------");
+                        console.log("GET /video/".concat(videoId));
+                        console.log("URL:", "".concat(this.BASE_URL, "/video/").concat(videoId, "?&lang=en"));
+                        console.log("Response:", res.data);
+                        console.log("Snippet:", res.data.video.snippet_html);
+                        console.log("------------------------------------------------");
                         return [2 /*return*/, res.data.video.snippet_html];
                 }
             });

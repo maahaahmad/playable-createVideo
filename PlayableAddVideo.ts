@@ -2,33 +2,36 @@ import axios from "axios"
 import fs from "fs"
 import path from "path"
 
-interface PlayableUserOptions {
+interface PlayableCredentials {
     email: string
     password: string
 }
 
-interface PlayableVideoOptions {
+interface VideoSource {
     filePath: string
     title: string
     width: number
     height: number
     duration: number
     filesize: number
+    contentType?: string
+}
+
+interface AddVideoResult {
+    videoId: string
+    snippetHtml: string
 }
 
 class PlayableClient {
     private email: string
     private password: string
 
-    // api doc uses access token but the endpoints actually want cognito token
     private propertyId?: string
     private cognitoAccessToken?: string
 
-    // move to env later
-    // api doc has an old base url but the endpoints are actually at the one below
-    private BASE_URL = "https://api-dev.playable.video/1"
+    private BASE_URL = "https://api-qa.playable.video/1"
 
-    constructor(userOptions: PlayableUserOptions) {
+    constructor(userOptions: PlayableCredentials) {
         this.email = userOptions.email
         this.password = userOptions.password
     }
@@ -37,40 +40,49 @@ class PlayableClient {
       Method that the client sees and interacts with
     ------------------------------ */
 
-    async addVideo(videoOptions: PlayableVideoOptions) {
+    async addVideo(videoSource: VideoSource): Promise<AddVideoResult> {
 
-        // Step 0: User logs in using email and password
+        // Step 0: Login: get cognito token + property id
         // Returns the cognito access token and property id which are needed for all subsequent steps
+        // ✅ works - logs users in
         await this.userLogin()
 
-        // Step 1: Create playable version of the video
+        // Step 1: Create edit: get edit_id and signed S3 upload URL
+        // ✅ works - creates an edit
         // Returns edit_id: id for the edit
         // url_upload: special temporary S3 upload link where user will upload the video file
-        // This creates a placeholder job for the video before the actual file is uploaded
-        const edit = await this.createEdit(videoOptions)
+        // doesnt upload the video
+        // doesnt create a placeholder for the video in the user's account
+        const edit = await this.createEdit(videoSource)
 
-        // Step 2: Creates the final playable video using the edit just created
+        // Step 2: Create video record: get video_id
+        // ✅ works - creates a placeholder video in user's Playable account
         // Returns the video_id which is needed to get the snippet later
-        const video = await this.createVideo(
-            edit.edit_id,
-            videoOptions
-        )
+        // creates a placeholder for the video in the user's account but the video is not playable yet since the file has not been uploaded
+        const video = await this.createVideo(edit.edit_id, videoSource)
 
-        // Step 3: Upload the actual video file to the special S3 upload link provided in step 2
-        // It sends the file to S3 storage
-        await this.uploadVideo(edit.url_upload, videoOptions.filePath)
+        await this.updateEdit(edit.edit_id, video.video_id)
 
-        // Step 4: Poll the edit endpoint until the video is done processing and ready
-        // states: uploading -> compiling -> transcoding -> ready
+
+
+        // Step 3: Upload the actual file to S3 using the signed URL from step 1
+        // returns 200 response suggesting that the upload is complete
+        await this.uploadVideo(edit.url_upload, videoSource.filePath, videoSource.contentType)
+
+        await new Promise(r => setTimeout(r, 5000))
+
+        // Step 4: Poll until processing is complete (uploading → compiling → transcoding → ready)
         await this.pollUntilReady(edit.edit_id)
 
-        // Step 5: Get the snippet for the video using the video id from step 2
-        const snippet = await this.getSnippet(video.video_id)
+        // Step 5: Fetch the final snippet HTML using the video_id from step 2
+        const snippetHtml = await this.getSnippet(video.video_id)
 
         return {
             videoId: video.video_id,
-            snippet
+            // snippetHtml: ""
+            snippetHtml
         }
+
     }
 
     /* -----------------------------
@@ -88,165 +100,197 @@ class PlayableClient {
         this.cognitoAccessToken = res.data.cognito_access_token
         this.propertyId = res.data.properties[0]
 
+        if (!this.cognitoAccessToken) {
+            throw new Error(`Login failed: no access token in response. Full response: ${JSON.stringify(res.data)}`)
+        }
+
         console.log("------------------------------------------------")
         console.log("POST /session")
-        console.log("URL:", `${this.BASE_URL}/session`)
-        console.log("Payload:", {
-            email: this.email,
-            password: this.password
-        })
-        console.log("Login response: ", res.data)
+        console.log("Login response:", JSON.stringify(res.data, null, 2)) 
+        console.log("✅ Logged in, propertyId:", this.propertyId)
         console.log("------------------------------------------------")
-        
+    }
+
+    private get authHeaders() {
         return {
-            cognitoAccessToken: this.cognitoAccessToken,
-            propertyId: this.propertyId
+            'Content-Type': 'application/json',
+            'Authorization': `${this.cognitoAccessToken}`
         }
     }
 
-    private async createEdit(videoOptions: PlayableVideoOptions) {
-        const fileName = path.basename(videoOptions.filePath)
-
-        const config = {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `${this.cognitoAccessToken}`
-            }
-        }
+    private async createEdit(videoSource: VideoSource) {
+        const fileName = path.basename(videoSource.filePath)
 
         const editData = {
             stem: "autoplay",
             params: {},
             property_id: this.propertyId,
             file: fileName,
-            content_type: "video/quicktime",
+            content_type: videoSource.contentType,
             source: {
-                duration: videoOptions.duration,
+                duration: videoSource.duration,
                 best: {
-                    width: videoOptions.width,
-                    height: videoOptions.height,
-                    crop: `${videoOptions.width}:${videoOptions.height}:0:0`,
-                    filesize: videoOptions.filesize
+                    width: videoSource.width,
+                    height: videoSource.height,
+                    crop: `${videoSource.width}:${videoSource.height}:0:0`,
+                    filesize: videoSource.filesize
                 }
             },
             access_token: this.cognitoAccessToken
         }
 
-        const res = await axios.post(`${this.BASE_URL}/edit?lang=en`, editData, config)
+        const res = await axios.post(`${this.BASE_URL}/edit?lang=en`, editData, {
+            headers: this.authHeaders
+        })
 
         console.log("------------------------------------------------")
         console.log("POST /edit")
-        console.log("URL:", `${this.BASE_URL}/edit?lang=en`)
-        console.log("Payload:", editData)
-        console.log("Response:", res.data)
+        console.log("Response:", JSON.stringify(res.data, null, 2))
+        console.log("✅ Edit created")
         console.log("------------------------------------------------")
 
         return res.data
     }
 
-    private async createVideo(editId: number, videoOptions: PlayableVideoOptions) {
-
-        const config = {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `${this.cognitoAccessToken}`
-            }
-        }
-
+    private async createVideo(editId: number, videoSource: VideoSource) {
         const videoData = {
-            width: videoOptions.width,
-            height: videoOptions.height,
+            width: videoSource.width,
+            height: videoSource.height,
             loop: 0,
             auto_height: true,
-            title: videoOptions.title,
+            title: videoSource.title,
             edit_id: editId,
             access_token: this.cognitoAccessToken
         }
 
-        const res = await axios.post(`${this.BASE_URL}/video?lang=en`, videoData, config)
+        const res = await axios.post(`${this.BASE_URL}/video?lang=en`, videoData, {
+            headers: this.authHeaders
+        })
 
         console.log("------------------------------------------------")
         console.log("POST /video")
-        console.log("URL:", `${this.BASE_URL}/video?lang=en`)
-        console.log("Payload:", videoData)
-        console.log("Response:", res.data)
+        console.log("Response:", JSON.stringify(res.data, null, 2))
+        console.log("✅ Video created")
         console.log("------------------------------------------------")
 
         return res.data
     }
 
-    private async uploadVideo(uploadUrl: string, filePath: string) {
+    private async uploadVideo(uploadUrl: string, filePath: string, contentType?: string) {
         const fileBuffer = fs.readFileSync(filePath)
 
         console.log("------------------------------------------------")
-        console.log("Uploading video to signed S3 URL")
+        console.log("PUT (S3 upload)")
         console.log("Upload URL:", uploadUrl)
-        console.log("File size:", fileBuffer.length)
 
-        const res = await axios.put(uploadUrl, fileBuffer, {
+        const res = await fetch(uploadUrl, {
+            method: 'PUT',
+            body: fileBuffer,
             headers: {
-                "Content-Type": "video/quicktime",
-                "Content-Length": fileBuffer.length
-            },
-            maxBodyLength: Infinity
+                'Content-Type': contentType ?? "video/quicktime"
+            }
         })
 
-        console.log("Upload Response Status: ", res.status)
-        console.log("------------------------------------------------")
+        console.log("S3 status:", res.status, res.statusText)
+        console.log("S3 response headers:", Object.fromEntries(res.headers.entries()))
+        const body = await res.text()
+        console.log("S3 response body:", JSON.stringify(body, null, 2))
 
+        if (!res.ok) {
+            throw new Error(`S3 upload failed: ${res.status} - ${body}`)
+        }
+
+        console.log("✅ Upload finished")
+        console.log("------------------------------------------------")
     }
 
     private async pollUntilReady(editId: number) {
-
-        const config = {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `${this.cognitoAccessToken}`
-            }
-        }
+        const timeout = 2 * 60 * 1000  // 2 minutes
+        const interval = 3000
+        const MAX_SAME_STATUS_COUNT = 10
+        let sameStatusCount = 0
+        let lastStatus = ""
+        const start = Date.now()
 
         console.log("------------------------------------------------")
-        console.log(`GET /edit/${editId}`)
-        console.log("URL:", `${this.BASE_URL}/edit/${editId}?&lang=en`)
+        console.log(`Polling edit ${editId} until ready...`)
 
         while (true) {
+            if (Date.now() - start > timeout) {
+                throw new Error("❌ Timeout waiting for video processing")
+            }
+
             const res = await axios.get(
-                `${this.BASE_URL}/edit/${editId}?&lang=en`,
-                config
+                `${this.BASE_URL}/edit/${editId}?lang=en&src=firebase`,
+                { headers: this.authHeaders }
             )
 
-            const status = res.data.edit.states.autoplay.status
-            console.log(`Polling edit ${editId} status:`, status)
+            const status: string = res.data.edit.states.autoplay.status
 
-            if (status === "ready") return
+            console.log("Response:", JSON.stringify(res.data, null, 2))
 
-            await new Promise(r => setTimeout(r, 3000))
+            // console.log(`Status: ${status}`)
+            // console.log(`Full state:`, JSON.stringify(res.data.edit.states, null, 2))
+
+
+            if (status === "ready") {
+                console.log("✅ Video is ready!")
+                console.log("------------------------------------------------")
+                return
+            }
+
+            if (status === lastStatus) {
+                sameStatusCount++
+            } else {
+                sameStatusCount = 0
+                lastStatus = status
+            }
+
+            if (sameStatusCount > MAX_SAME_STATUS_COUNT) {
+                throw new Error(`❌ Stuck in status "${status}" for too long`)
+            }
+
+            await new Promise(resolve => setTimeout(resolve, interval))
         }
-        
     }
 
-    private async getSnippet(videoId: string) {
-        const config = {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `${this.cognitoAccessToken}`
-            }
-        }
+    private async getSnippet(videoId: string): Promise<string> {
 
         const res = await axios.get(
-            `${this.BASE_URL}/video/${videoId}?&lang=en`,
-            config
+            `${this.BASE_URL}/video/${encodeURIComponent(videoId)}?lang=en&src=firebase`,
+            { headers: this.authHeaders }
         )
 
         console.log("------------------------------------------------")
         console.log(`GET /video/${videoId}`)
-        console.log("URL:", `${this.BASE_URL}/video/${videoId}?&lang=en`)
-        console.log("Response:", res.data)
         console.log("Snippet:", res.data.video.snippet_html)
+        console.log("✅ Snippet fetched")
         console.log("------------------------------------------------")
 
-
         return res.data.video.snippet_html
+    }
+
+    private async updateEdit(editId: number, videoId: number) {
+        const res = await axios.post(
+            `${this.BASE_URL}/edit/${editId}?_method=PUT&lang=en`,
+            {video_id: videoId},  
+            { headers: this.authHeaders }
+        )
+
+        console.log("------------------------------------------------")
+        console.log(`PUT /edit/${editId}`)
+        console.log("✅ Edit updated")
+        console.log("------------------------------------------------")
+
+        const response = await axios.get(`${this.BASE_URL}/edit/${editId}`, {
+            headers: this.authHeaders
+        })
+
+        console.log("------------------------------------------------")
+        console.log(`GET /edit/${editId}`)
+        console.log("Response:", JSON.stringify(response.data, null, 2))
+        console.log("✅ Edit fetched")
+        console.log("------------------------------------------------")
     }
 }
 

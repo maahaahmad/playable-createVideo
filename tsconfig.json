@@ -12,9 +12,14 @@
     "exactOptionalPropertyTypes": true,
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@playable/*": ["./src/*"],
+      "@playable": ["./src/index.ts"]
+    }
   },
 
-  "include": ["*.ts"],
+  "include": ["src/**/*", "examples/**/*"],
   "exclude": ["node_modules"]
 }

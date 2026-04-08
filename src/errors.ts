@@ -14,7 +14,7 @@ export class VideoProcessingError extends Error {
 
 export class TimeoutError extends Error {
     constructor(timeoutMs: number) {
-        super(`Video processing did not complete within ${timeoutMs / 1000} seconds.`)
+        super(`Video processing did not complete within ${timeoutMs / 1000} seconds`)
         this.name = "TimeoutError"
     }
 }
@@ -51,5 +51,26 @@ export class UpdateEditError extends Error {
     constructor(statusCode: number, message: string){
         super(`Failed to update edit with video ID: ${statusCode} - ${message}`)
         this.name = "UpdateEditError"
+    }
+}
+
+export function getErrorDetails(error: any): {statusCode: number, message: string} {
+    if (error.response){
+        return{
+            statusCode: error.response.status, 
+            message: error.response.data?.message || error.message
+        }
+    }
+
+    if (error.request){
+        return {
+            statusCode: 0,
+            message: "No response received from server"
+        }
+    }
+
+    return {
+        statusCode: 0,
+        message: error.message || "An unknown error occurred"
     }
 }

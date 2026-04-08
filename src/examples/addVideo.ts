@@ -7,6 +7,10 @@ import { config } from "../config"
 async function addVideo() {
     try {
 
+        if (!config.playable.userEmail || !config.playable.userPassword) {
+            throw new Error("PLAYABLE_USER_EMAIL and PLAYABLE_USER_PASSWORD must be set")
+        }
+
         // Using hardcoded credentials for testing only; replace with user-provided credentials in production
         const client = new PlayableClient(
             {
@@ -14,10 +18,6 @@ async function addVideo() {
                 password: config.playable.userPassword!
             }
         )
-
-        if (!config.playable.userEmail || !config.playable.userPassword) {
-            throw new Error("PLAYABLE_USER_EMAIL and PLAYABLE_USER_PASSWORD must be set")
-        }
 
         const filePath = "FILE-PATH" // replace with user's video file path
 

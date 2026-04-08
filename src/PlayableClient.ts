@@ -2,7 +2,7 @@ import axios from "axios"
 import fs from "fs"
 import path from "path"
 import { PlayableCredentials, VideoSource, AddVideoResult } from "./types"
-import { AuthenticationError, EditCreationError, VideoCreationError, VideoProcessingError, SnippetFetchError, TimeoutError, UploadVideoError, UpdateEditError } from "./errors"
+import { AuthenticationError, EditCreationError, VideoCreationError, VideoProcessingError, SnippetFetchError, TimeoutError, UploadVideoError, UpdateEditError, getErrorDetails } from "./errors"
 import { config } from "./config"
 
 class PlayableClient {
@@ -46,8 +46,6 @@ class PlayableClient {
         // Step 4: Upload the actual file to S3 using the signed URL from step 1
         await this.uploadVideo(edit.url_upload, videoSource.filePath, videoSource.contentType)
 
-        await new Promise(r => setTimeout(r, 5000))
-
         // Step 5: Poll until processing is complete (uploading → compiling → transcoding → ready)
         await this.pollUntilReady(edit.edit_id)
 
@@ -58,7 +56,6 @@ class PlayableClient {
             videoId: video.video_id,
             snippetHtml
         }
-
     }
 
     /* -----------------------------
@@ -79,18 +76,13 @@ class PlayableClient {
             this.propertyId = res.data.properties[0]
 
             if (!this.cognitoAccessToken) {
-                // throw new Error(`Login failed: no access token in response. Full response: ${JSON.stringify(res.data)}`)
                 throw new AuthenticationError(res.status, "Login Failed: No access token in response")
             }
 
-            console.log("------------------------------------------------")
-            // console.log("POST /session")
-            // console.log("Login response:", JSON.stringify(res.data, null, 2)) 
             console.log("✅ Logged in")
-            console.log("------------------------------------------------")
-
         } catch (error: any) {
-            throw new AuthenticationError(error.response.status, error.message || "Login failed")
+            const {statusCode, message} = getErrorDetails(error)
+            throw new AuthenticationError(statusCode, message || "Login failed")
         }
     }
 
@@ -131,16 +123,11 @@ class PlayableClient {
                 throw new EditCreationError(res.status, "Edit creation failed: missing Edit ID or S3 presigned URL in response")
             }
 
-            console.log("------------------------------------------------")
-            // console.log("POST /edit")
-            console.log("Response of POST /edit:", JSON.stringify(res.data, null, 2))
             console.log("✅ Edit created")
-            console.log("------------------------------------------------")
-
             return res.data
-
         } catch (error: any) {
-            throw new EditCreationError(error.response.status, error.message || "Failed to create edit")
+            const {statusCode, message} = getErrorDetails(error)
+            throw new EditCreationError(statusCode, message || "Failed to create edit")
         }
     }
 
@@ -163,23 +150,18 @@ class PlayableClient {
             if (!res.data.video_id) {
                 throw new VideoCreationError(res.status, "Video creation failed: missing video ID in response")
             }
-
-            console.log("------------------------------------------------")
-            // console.log("POST /video")
-            console.log("Response of POST /video:", JSON.stringify(res.data, null, 2))
+            
             console.log("✅ Video created")
-            console.log("------------------------------------------------")
-
             return res.data
         } catch (error: any) {
-            throw new VideoCreationError(error.response.status, error.message || "Failed to create video")
+            const {statusCode, message} = getErrorDetails(error)
+            throw new VideoCreationError(statusCode, message || "Failed to create video")
         }
     }
 
     private async uploadVideo(uploadUrl: string, filePath: string, contentType?: string) {
         const fileBuffer = fs.readFileSync(filePath)
 
-        console.log("------------------------------------------------")
 
         try {
             const res = await fetch(uploadUrl, {
@@ -196,7 +178,6 @@ class PlayableClient {
             }
 
             console.log("✅ Upload finished")
-            console.log("------------------------------------------------")
         } catch (err: any) {
             throw new UploadVideoError(500, err.message || "Network error uploading video")
         }
@@ -210,12 +191,10 @@ class PlayableClient {
         let lastStatus = ""
         const start = Date.now()
 
-        console.log("------------------------------------------------")
         console.log(`Polling edit ${editId} until ready...`)
 
         while (true) {
             if (Date.now() - start > timeout) {
-                // throw new Error("❌ Timeout waiting for video processing")
                 throw new TimeoutError(timeout)
             }
 
@@ -230,7 +209,6 @@ class PlayableClient {
 
             if (status === "ready") {
                 console.log("✅ Video is ready!")
-                console.log("------------------------------------------------")
                 return
             }
 
@@ -242,7 +220,6 @@ class PlayableClient {
             }
 
             if (sameStatusCount > MAX_SAME_STATUS_COUNT) {
-                // throw new Error(`❌ Stuck in status "${status}" for too long`)
                 throw new VideoProcessingError(res.status, `Stuck in status "${status}" for too long`)
 
             }
@@ -262,16 +239,12 @@ class PlayableClient {
                 throw new SnippetFetchError(res.status, 'No snippet_html returned for video')
             }
 
-            console.log("------------------------------------------------")
-            // console.log(`GET /video/${videoId}`)
-            console.log("Snippet:", res.data.video.snippet_html)
             console.log("✅ Snippet fetched")
-            console.log("------------------------------------------------")
-
             return res.data.video.snippet_html
 
         } catch (error: any) {
-            throw new SnippetFetchError(error.response.status, error.message || "Failed to fetch snippet")
+            const {statusCode, message} = getErrorDetails(error)
+            throw new SnippetFetchError(statusCode, message || "Failed to fetch snippet")
         }
     }
 
@@ -283,10 +256,7 @@ class PlayableClient {
                 { headers: this.authHeaders }
             )
 
-            console.log("------------------------------------------------")
-            // console.log(`PUT /edit/${editId}`)
             console.log("✅ Edit updated")
-            console.log("------------------------------------------------")
 
             const response = await axios.get(`${this.BASE_URL}/edit/${editId}`, {
                 headers: this.authHeaders
@@ -296,14 +266,10 @@ class PlayableClient {
                 throw new UpdateEditError(response.status, "Edit update failed: video ID not associated with edit after update")
             }
 
-            console.log("------------------------------------------------")
-            console.log(`Response GET /edit/${editId}`)
-            console.log(JSON.stringify(response.data, null, 2))
-            console.log("------------------------------------------------")
         } catch (error: any) {
-            throw new UpdateEditError(error.response.status, error.message || "Failed to update edit with video ID")
+            const {statusCode, message} = getErrorDetails(error)
+            throw new UpdateEditError(statusCode, message || "Failed to update edit with video ID")
         }
-
     }
 }
 

@@ -30,7 +30,7 @@ PLAYABLE_USER_PASSWORD=your-password
 ## Usage
 The library exposes a main client, `PlayableClient`, which handles video uploading and snippet retrieval
 
-See [examples/addVideo.ts](examples/addVideo.ts) for a full usage example.
+See [examples/addVideo.ts](src/examples/addVideo.ts) for a full usage example.
 
 ```
 import fs from "fs"
